@@ -220,10 +220,10 @@
   <h1>HOW TO <span>PLAY</span></h1>
   <div id="instructionsList">
     <div class="instrSection">EXPLORATION</div>
-    <div><b>Drag</b> move · <b>Double-tap ground</b> dash there (fast scouting) · <b>Two-finger drag</b> pan/tilt camera · <b>Pinch</b> zoom</div>
+    <div><b>Drag</b> move · <b>Two-finger drag</b> pan/tilt camera · <b>Pinch</b> zoom</div>
 
     <div class="instrSection">COMBAT</div>
-    <div><b>Tap</b> fire / hurl a bar / shoot a drone · <b>Hold</b> ground wave, Tesla coil on a bar, shatter a drone · <b>Double-tap a drone</b> knock it back · <b>Tap+hold</b> early shield (+50% speed, shatters drones on contact)</div>
+    <div><b>Tap</b> fire instantly / hurl a bar / shoot a drone · <b>Hold</b> ground wave, Tesla coil on a bar, shatter a drone · <b>Tap+hold</b> early shield (+50% speed, shatters drones on contact)</div>
 
     <div class="instrSection">MAP OBJECTS</div>
     <div><b>Canisters</b> shoot from range (dark ones = huge) · <b>Green orb</b> +50% health · <b>Blue orb</b> reflects enemy shots</div>
@@ -310,7 +310,7 @@ window.addEventListener('unhandledrejection', function(e){
   el.textContent += 'UNHANDLED PROMISE REJECTION: ' + e.reason + '\n\n';
 });
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
 <script>
   if (typeof THREE === 'undefined'){
     var el = document.getElementById('errorOverlay');
@@ -388,6 +388,25 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false }
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = false;
+
+/* WebGL context loss (common on mobile under GPU memory pressure) fires no catchable JS error —
+   the render loop just silently stops producing frames, which looks exactly like a random freeze.
+   Without this listener there is no way to know it happened or recover from it at all. */
+canvas.addEventListener('webglcontextlost', function(e){
+  e.preventDefault();
+  const el = document.getElementById('errorOverlay');
+  el.style.display = 'block';
+  el.textContent += 'GRAPHICS CONTEXT LOST (usually GPU memory pressure on mobile).\nTap RELOAD to recover — your progress this run can\'t be preserved.\n\n';
+  const btn = document.createElement('button');
+  btn.textContent = 'RELOAD';
+  btn.style.cssText = 'margin-top:10px; padding:12px 24px; font-family:monospace; font-size:14px; background:#ff3b56; color:#fff; border:none; cursor:pointer;';
+  btn.onclick = function(){ location.reload(); };
+  el.appendChild(btn);
+});
+canvas.addEventListener('webglcontextrestored', function(){
+  const el = document.getElementById('errorOverlay');
+  el.textContent += 'Context restored automatically, but a full reload is still the safest way to continue.\n\n';
+});
 
 const scene = new THREE.Scene();
 
@@ -1012,7 +1031,6 @@ const MUTATORS = [
   { key:'swarm',    label:'SWARM',     desc:'MORE FOES, LESS ARMOR', spawnMult:1.6, reinforceMult:0.4, speedMult:1 },
   { key:'ironclad', label:'IRONCLAD',  desc:'ARMOR REINFORCED',      spawnMult:0.85, reinforceMult:2.4, speedMult:1 },
   { key:'overdrive',label:'OVERDRIVE', desc:'HOSTILES MOVE FASTER',  spawnMult:1, reinforceMult:1, speedMult:1.45 },
-  { key:'blackout', label:'BLACKOUT',  desc:'VISION IMPAIRED',       spawnMult:1, reinforceMult:1, speedMult:1, fogMult:2.4 },
 ];
 
 function beginWave(n){
@@ -1023,10 +1041,7 @@ function beginWave(n){
   state.activeMutator = mutatorEligible ? MUTATORS[Math.floor(Math.random()*MUTATORS.length)] : null;
 
   const themePal = THEMES[currentTheme] || THEMES.gunmetal;
-  scene.fog.density = themePal.fogDensity * ((state.activeMutator && state.activeMutator.fogMult) || 1);
-  if (state.activeMutator && state.activeMutator.key === 'blackout'){
-    pickupSpawnTimer = Math.min(pickupSpawnTimer, 8);
-  }
+  scene.fog.density = themePal.fogDensity;
 
   const baseCount = 3 + Math.floor(n*1.8);
   spawnQueue = Math.min(Math.round(baseCount * ((state.activeMutator && state.activeMutator.spawnMult) || 1)), state.endless ? 30 : 22);
@@ -2200,28 +2215,12 @@ function releasePointer(e, fire){
   hidePressRing();
   if (p.longPressFired) return;
 
-  if (p.isDoubleCandidate){
-    if (fire){
-      if (p.target === 'sentinel' && p.targetRef && p.targetRef.alive){
-        knockbackSentinel(p.targetRef);
-      } else {
-        attemptDash(p.targetPoint || player.position.clone());
-      }
-    }
-  } else {
-    lastTapUp = { x:p.x, y:p.y, time: performance.now() };
-    if (fire){
-      const tapTarget = p.target, tapRef = p.targetRef, tapX = p.x, tapY = p.y;
-      pendingTapAction = {
-        timeout: setTimeout(() => {
-          pendingTapAction = null;
-          if (tapTarget === 'metal' && tapRef && tapRef.alive){
-            launchMetalBar(tapRef);
-          } else {
-            fireAtScreenPoint(tapX, tapY);
-          }
-        }, DOUBLE_WINDOW_MS)
-      };
+  lastTapUp = { x:p.x, y:p.y, time: performance.now() };
+  if (fire){
+    if (p.target === 'metal' && p.targetRef && p.targetRef.alive){
+      launchMetalBar(p.targetRef);
+    } else {
+      fireAtScreenPoint(p.x, p.y);
     }
   }
 }
